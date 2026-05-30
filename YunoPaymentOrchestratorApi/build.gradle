@@ -1,0 +1,64 @@
+plugins {
+	id 'java-library'
+	id 'org.openapi.generator' version '7.22.0'
+}
+
+group = 'com.yuno'
+version = '0.0.1-SNAPSHOT'
+
+java {
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(21)
+	}
+}
+
+repositories {
+	mavenCentral()
+}
+
+dependencies {
+	api platform('org.springframework.boot:spring-boot-dependencies:4.0.6')
+
+	api 'jakarta.annotation:jakarta.annotation-api'
+	api 'jakarta.servlet:jakarta.servlet-api'
+	api 'jakarta.validation:jakarta.validation-api'
+	api 'com.fasterxml.jackson.core:jackson-annotations'
+	api 'org.springframework:spring-context'
+	api 'org.springframework:spring-web'
+}
+
+openApiGenerate {
+	generatorName = 'spring'
+	inputSpec = "${projectDir}/src/main/resources/swagger.json"
+	outputDir = "${layout.buildDirectory.get()}/generated/openapi"
+	apiPackage = 'com.yuno.payment.orchestrator.api'
+	modelPackage = 'com.yuno.payment.orchestrator.api.model'
+	invokerPackage = 'com.yuno.payment.orchestrator.api'
+	configOptions = [
+			annotationLibrary     : 'none',
+			configPackage         : 'com.yuno.payment.orchestrator.api.configuration',
+			dateLibrary           : 'java8',
+			documentationProvider : 'none',
+			hideGenerationTimestamp: 'true',
+			interfaceOnly         : 'true',
+			openApiNullable       : 'false',
+			requestMappingMode    : 'api_interface',
+			skipDefaultInterface  : 'true',
+			useBeanValidation     : 'true',
+			useJackson3           : 'true',
+			useSpringBoot4        : 'true',
+			useTags               : 'true'
+	]
+}
+
+sourceSets {
+	main {
+		java {
+			srcDir "${layout.buildDirectory.get()}/generated/openapi/src/main/java"
+		}
+	}
+}
+
+tasks.named('compileJava') {
+	dependsOn tasks.named('openApiGenerate')
+}
