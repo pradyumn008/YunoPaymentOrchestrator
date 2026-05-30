@@ -1,0 +1,222 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Yuno Payment Orchestrator API",
+    "description": "Payment orchestration API — create payments, track status, route by payment method, retry/failover.",
+    "version": "2.0.0"
+  },
+  "servers": [
+    { "url": "http://localhost:8080", "description": "Local development server" }
+  ],
+  "tags": [
+    { "name": "Payments", "description": "Payment orchestration operations" }
+  ],
+  "paths": {
+    "/api/v1/payments": {
+      "post": {
+        "tags": ["Payments"],
+        "summary": "Create payment",
+        "description": "Creates a payment. CARD payments route to Provider A; UPI payments route to Provider B. The engine retries the primary provider twice then fails over to the secondary provider once. Each Request-Id may only be used once.",
+        "operationId": "createPayment",
+        "parameters": [
+          { "$ref": "#/components/parameters/RequestId" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreatePaymentRequest" },
+              "example": {
+                "amount": 1200.50,
+                "currency": "USD",
+                "paymentMethod": "CARD",
+                "merchantReferenceId": "ORDER-1001"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Payment created and processed.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/PaymentResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "409": { "$ref": "#/components/responses/DuplicateRequestId" }
+        }
+      }
+    },
+    "/api/v1/payments/{paymentId}": {
+      "get": {
+        "tags": ["Payments"],
+        "summary": "Fetch payment",
+        "description": "Fetches the persisted payment state and provider attempt history by payment ID.",
+        "operationId": "getPayment",
+        "parameters": [
+          {
+            "name": "paymentId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid", "example": "7f43d3a6-1677-45ed-9f4d-55f407066bb9" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Payment found.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/PaymentResponse" }
+              }
+            }
+          },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "RequestId": {
+        "name": "Request-Id",
+        "in": "header",
+        "required": true,
+        "description": "Client-supplied unique request identifier. Each value may only be used once.",
+        "schema": { "type": "string", "minLength": 1, "maxLength": 128, "example": "req-001" }
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Request validation failed or a required header is missing.",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+          }
+        }
+      },
+      "DuplicateRequestId": {
+        "description": "The Request-Id was already used for a previous payment request.",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+            "example": {
+              "timestamp": "2026-05-30T13:10:00Z",
+              "status": 409,
+              "error": "Conflict",
+              "message": "same requestId",
+              "path": "/api/v1/payments",
+              "violations": {}
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "Payment ID was not found.",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "CreatePaymentRequest": {
+        "type": "object",
+        "required": ["amount", "currency", "paymentMethod", "merchantReferenceId"],
+        "properties": {
+          "amount": {
+            "type": "number",
+            "format": "decimal",
+            "minimum": 0.01,
+            "multipleOf": 0.01,
+            "description": "Payment amount — up to 17 integer digits and 2 decimal places.",
+            "example": 1200.50
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$",
+            "description": "Three-letter uppercase ISO-4217 currency code.",
+            "example": "USD"
+          },
+          "paymentMethod": { "$ref": "#/components/schemas/PaymentMethod" },
+          "merchantReferenceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "description": "Merchant-side order or payment reference.",
+            "example": "ORDER-1001"
+          }
+        }
+      },
+      "PaymentResponse": {
+        "type": "object",
+        "required": [
+          "paymentId", "amount", "currency", "paymentMethod",
+          "status", "merchantReferenceId", "createdAt", "updatedAt", "attempts"
+        ],
+        "properties": {
+          "paymentId": { "type": "string", "format": "uuid" },
+          "amount": { "type": "number", "format": "decimal", "example": 1200.50 },
+          "currency": { "type": "string", "example": "USD" },
+          "paymentMethod": { "$ref": "#/components/schemas/PaymentMethod" },
+          "status": { "$ref": "#/components/schemas/PaymentStatus" },
+          "merchantReferenceId": { "type": "string", "example": "ORDER-1001" },
+          "provider": { "$ref": "#/components/schemas/ProviderCode" },
+          "providerPaymentId": { "type": "string", "example": "A-c8d021c7-97ef-42d8-9ff1-9247ee7d22db" },
+          "failureReason": { "type": "string", "example": "Provider B failure" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string", "format": "date-time" },
+          "attempts": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/PaymentAttemptResponse" }
+          }
+        }
+      },
+      "PaymentAttemptResponse": {
+        "type": "object",
+        "required": ["attemptNumber", "provider", "status", "attemptedAt"],
+        "properties": {
+          "attemptNumber": { "type": "integer", "format": "int32", "minimum": 1, "example": 1 },
+          "provider": { "$ref": "#/components/schemas/ProviderCode" },
+          "status": { "$ref": "#/components/schemas/PaymentStatus" },
+          "providerReference": { "type": "string", "example": "A-c8d021c7-97ef-42d8-9ff1-9247ee7d22db" },
+          "failureReason": { "type": "string", "example": "Provider A failure" },
+          "attemptedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "required": ["timestamp", "status", "error", "message", "path", "violations"],
+        "properties": {
+          "timestamp": { "type": "string", "format": "date-time" },
+          "status": { "type": "integer", "format": "int32" },
+          "error": { "type": "string" },
+          "message": { "type": "string" },
+          "path": { "type": "string" },
+          "violations": {
+            "type": "object",
+            "additionalProperties": { "type": "string" }
+          }
+        }
+      },
+      "PaymentMethod": {
+        "type": "string",
+        "enum": ["CARD", "UPI"],
+        "example": "CARD"
+      },
+      "PaymentStatus": {
+        "type": "string",
+        "enum": ["INITIATED", "PROCESSING", "SUCCEEDED", "FAILED"],
+        "example": "SUCCEEDED"
+      },
+      "ProviderCode": {
+        "type": "string",
+        "nullable": true,
+        "enum": ["A", "B"],
+        "example": "A"
+      }
+    }
+  }
+}
